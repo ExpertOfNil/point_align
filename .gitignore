@@ -1,7 +1,5 @@
-.cache/
-bin/
-lib/
-build/
-include/cimpl*
-power_iterations.txt
-nob*
+/.cache/
+/bin/
+/lib/
+/build/
+/power_iterations.txt
