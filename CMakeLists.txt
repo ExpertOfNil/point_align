@@ -70,11 +70,13 @@ if(USE_OPENBLAS AND EXISTS "${PROJECT_SOURCE_DIR}/vendor/lib/openblas/libopenbla
         pthread
         m
     )
+    target_compile_definitions(point_align PRIVATE USE_OPENBLAS)
     target_link_libraries(point_align_static PUBLIC
         openblas
         pthread
         m
     )
+    target_compile_definitions(point_align_static PRIVATE USE_OPENBLAS)
 else()
     if(USE_OPENBLAS)
         message(WARNING "OpenBLAS: DISABLED (libopenblas.a not found)")

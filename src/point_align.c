@@ -2,11 +2,54 @@
 
 #include <assert.h>
 #include <float.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #define MAX_ITERATIONS 10000
 #define CONVERGENCE_TOLERANCE 0.999999999
+
+#if USE_OPENBLAS
+#include <lapacke.h>
+
+static ReturnCode lapack_eigensolver(const Mat4d N, Quatd* q_vec) {
+    lapack_int n = 4;
+    lapack_int il = 4;
+    lapack_int iu = 4;
+    lapack_int m;
+    lapack_int isuppz[8];
+    double w[4];
+    double z[16];
+
+    lapack_int info = LAPACKE_dsyevr(
+        LAPACK_COL_MAJOR,
+        'V',
+        'I',
+        'U',
+        n,
+        (double*)&N,
+        n,
+        0.0,
+        0.0,
+        il,
+        iu,
+        0.0,
+        &m,
+        w,
+        z,
+        n,
+        isuppz
+    );
+
+    if (info != 0) {
+        return RETURN_FAIL;
+    }
+
+    *q_vec = (Quatd){z[0], z[1], z[2], z[3]};
+    *q_vec = Quatd_normalize(*q_vec);
+    return RETURN_OK;
+}
+#endif
 
 static void Mat4d_print(Mat4d m) {
     printf("Col 0: [%12.6f,%12.6f,%12.6f,%12.6f]\n", m.xi, m.xj, m.xk, m.xw);
@@ -612,9 +655,7 @@ static ReturnCode ferrari(const Mat4d N, Quatd* q_vec) {
             lambda_max = lambda_new;
         }
     }
-    printf(
-        "Ferrari Eigenvalue: %.6f (index %d)\n", lambda_max, max_abs_idx
-    );
+    printf("Ferrari Eigenvalue: %.6f (index %d)\n", lambda_max, max_abs_idx);
 
     // Degeneracy detection
     if (num_roots >= 2) {
@@ -647,7 +688,7 @@ Transform3d align_points(
         return t;
     }
 
-    // Step 1: Compute centroids
+    // Compute centroids
     Vec3d centroid_source = compute_centroid(source, n_points);
     printf(
         "Source centroid: [%12.6f, %12.6f, %12.6f]\n",
@@ -663,7 +704,7 @@ Transform3d align_points(
         centroid_target.z
     );
 
-    // Step 2: Build cross-covariance matrix (3x3)
+    // Build cross-covariance matrix (3x3)
     double Sxx = 0.0, Sxy = 0.0, Sxz = 0.0;
     double Syx = 0.0, Syy = 0.0, Syz = 0.0;
     double Szx = 0.0, Szy = 0.0, Szz = 0.0;
@@ -729,59 +770,17 @@ Transform3d align_points(
     printf("N matrix:\n");
     Mat4d_print(N);
 
-    printf("\nTest case N = diag(2, 3, 5, 7)...\n");
-    Mat4d N_test = MAT4D_IDENTITY;
-    N_test.xi = 2.0;
-    N_test.yj = 3.0;
-    N_test.zk = 5.0;
-    N_test.tw = 7.0;
-    printf("Test case Ferrari method...\n");
-    Quatd q_test = QUATD_IDENTITY;
-    ferrari(N_test, &q_test);
+    Vec4d q_vec = QUATD_IDENTITY;
 
-    printf("\nContinuing with provided N...\n");
-    // Find largest diagonal element
-    double diag[4] = {N.xi, N.yj, N.zk, N.tw};
-    int max_idx = 0;
-    double max_val = diag[0];
-    for (int i = 1; i < 4; i++) {
-        if (diag[i] > max_val) {
-            max_val = diag[i];
-            max_idx = i;
-        }
-    }
-
-    // Step 4: Eigenvalue solver
-
-    Vec4d q_vec;
-    // q_vec = (Quatd)QUATD_IDENTITY;
-    switch (max_idx) {
-        case 0:
-            q_vec = (Vec4d){N.xi, N.xj, N.xk, N.xw};
-            break;
-        case 1:
-            q_vec = (Vec4d){N.yi, N.yj, N.yk, N.yw};
-            break;
-        case 2:
-            q_vec = (Vec4d){N.zi, N.zj, N.zk, N.zw};
-            break;
-        case 3:
-            q_vec = (Vec4d){N.ti, N.tj, N.tk, N.tw};
-            break;
-    }
-    q_vec = Quatd_normalize(q_vec);
-
-#if USE_POWER_ITERATION
-    printf("\nPower Iteration method...\n");
-    ReturnCode rc_power = power_iteration(N, MAX_ITERATIONS, &q_vec);
-    assert(rc_power != RETURN_ITERATION_FAIL && "Convergence NOT reached!\n");
+#if USE_OPENBLAS
+    printf("\nComputing eigenvalues with OpenBLAS LAPACK DSYEVR...\n");
+    ReturnCode rc_ob = lapack_eigensolver(N, &q_vec);
+    assert(rc_ob != RETURN_OPENBLAS_FAIL && "OpenBLAS failed!\n");
 #else
-    printf("\nFerrari method...\n");
+    printf("\nComputing eigenvalues with Ferrari method...\n");
     ReturnCode rc_ferrari = ferrari(N, &q_vec);
     assert(rc_ferrari != RETURN_FAIL && "Convergence NOT reached!\n");
 #endif
-
-    printf("\nBelow results are for Ferrari method...\n");
 
     // Ensure the quaternion is normalized
     double q_mag = Quatd_length(q_vec);
@@ -797,7 +796,7 @@ Transform3d align_points(
         q_vec.w = -q_vec.w;
     }
 
-    // Step 5: Compute translation
+    // Compute translation
     Vec3d rotated_source_centroid = Quatd_rotate_vec3d(q_vec, centroid_source);
     Vec3d translation = Vec3d_sub(centroid_target, rotated_source_centroid);
     Transform3d t = {

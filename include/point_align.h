@@ -11,6 +11,7 @@ typedef enum {
     RETURN_FAIL,
     RETURN_INVERSE_FAIL,
     RETURN_ITERATION_FAIL,
+    RETURN_OPENBLAS_FAIL,
 } ReturnCode;
 
 typedef struct Vec3d {
